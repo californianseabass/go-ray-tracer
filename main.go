@@ -8,6 +8,33 @@ import (
 	"os"
 )
 
+// hitable.go
+type hit_record struct {
+	t      float64
+	p      Vector
+	normal Vector
+}
+
+type hitable interface {
+	hit(r *Ray, t_min float64, t_max float64, rec *hit_record) bool
+}
+
+// sphere.go
+
+type Sphere struct {
+	Center Vector
+	Radius float64
+}
+
+func (s *Sphere) hit(r *Ray) bool {
+	oc := r.Origin.Minus(&s.Center)
+	a := r.Direction.Dot(&r.Direction)
+	b := oc.Dot(&r.Direction) * 2.0
+	c := oc.Dot(oc) - s.Radius*s.Radius
+	discriminant := b*b - 4*a*c
+	return discriminant > 0
+}
+
 // ray.go
 type Ray struct {
 	Origin    Vector
@@ -33,6 +60,10 @@ func (v *Vector) Add(u *Vector) *Vector {
 	return &Vector{v.X + u.X, v.Y + u.Y, v.Z + u.Z}
 }
 
+func (v *Vector) Minus(u *Vector) *Vector {
+	return &Vector{v.X - u.X, v.Y - u.Y, v.Z - u.Z}
+}
+
 func (v *Vector) Multiply(t float64) *Vector {
 	return &Vector{v.X * t, v.Y * t, v.Z * t}
 }
@@ -50,9 +81,15 @@ func (v *Vector) Length() float64 {
 	return math.Sqrt(v.X*v.X + v.Y*v.Y + v.Z*v.Z)
 }
 
-// main.go
+func (v *Vector) Dot(u *Vector) float64 {
+	return v.X*u.X + v.Y*u.Y + v.Z*u.Z
+}
 
-func pixelValue(ray *Ray) *color.RGBA {
+// main.go
+var redCircleCenter Vector = Vector{0.0, 0.0, 1.0}
+var redCircle *Sphere = &Sphere{redCircleCenter, 0.5}
+
+func backgroundPixel(ray *Ray) *Vector {
 	unit_direction := UnitVector(ray.Direction)
 	// scale the y contribution to be between 0 and 1
 	t := 0.5 * (unit_direction.Y + 1.0)
@@ -60,6 +97,16 @@ func pixelValue(ray *Ray) *color.RGBA {
 	startValue := &Vector{1.0, 1.0, 1.0}
 	endValue := &Vector{0.5, 0.7, 1.0}
 	pixel := startValue.Multiply(1.0 - t).Add(endValue.Multiply(t))
+	return pixel
+}
+
+func pixelValue(ray *Ray) *color.RGBA {
+	var pixel *Vector
+	if redCircle.hit(ray) {
+		pixel = &Vector{1.0, 0.0, 0.0}
+	} else {
+		pixel = backgroundPixel(ray)
+	}
 	r := uint8(float64(255.99) * pixel.X)
 	g := uint8(float64(255.99) * pixel.Y)
 	b := uint8(float64(255.99) * pixel.Z)
