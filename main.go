@@ -26,13 +26,17 @@ type Sphere struct {
 	Radius float64
 }
 
-func (s *Sphere) hit(r *Ray) bool {
+func (s *Sphere) hit(r *Ray) float64 {
 	oc := r.Origin.Minus(&s.Center)
 	a := r.Direction.Dot(&r.Direction)
 	b := oc.Dot(&r.Direction) * 2.0
 	c := oc.Dot(oc) - s.Radius*s.Radius
 	discriminant := b*b - 4*a*c
-	return discriminant > 0
+	if discriminant < 0 {
+		return -1.0
+	} else {
+		return (-b - math.Sqrt(discriminant)) / (2.0 * a)
+	}
 }
 
 // ray.go
@@ -72,7 +76,7 @@ func (v *Vector) Divide(t float64) *Vector {
 	return &Vector{v.X / t, v.Y / t, v.Z / t}
 }
 
-func UnitVector(v Vector) *Vector {
+func UnitVector(v *Vector) *Vector {
 	length := v.Length()
 	return v.Divide(length)
 }
@@ -86,11 +90,11 @@ func (v *Vector) Dot(u *Vector) float64 {
 }
 
 // main.go
-var redCircleCenter Vector = Vector{0.0, 0.0, 1.0}
-var redCircle *Sphere = &Sphere{redCircleCenter, 0.5}
+var circleCenter Vector = Vector{0.0, 0.0, -1.0}
+var circle Sphere = Sphere{circleCenter, 0.5}
 
 func backgroundPixel(ray *Ray) *Vector {
-	unit_direction := UnitVector(ray.Direction)
+	unit_direction := UnitVector(&ray.Direction)
 	// scale the y contribution to be between 0 and 1
 	t := 0.5 * (unit_direction.Y + 1.0)
 	// lerp = blended_value = (1-t)*start_value + t*end_value
@@ -102,8 +106,11 @@ func backgroundPixel(ray *Ray) *Vector {
 
 func pixelValue(ray *Ray) *color.RGBA {
 	var pixel *Vector
-	if redCircle.hit(ray) {
-		pixel = &Vector{1.0, 0.0, 0.0}
+	t := circle.hit(ray)
+	if t > 0.0 {
+		N := UnitVector(ray.point_at_parameter(t).Minus(&circleCenter))
+		v := Vector{N.X + 1, N.Y + 1, N.Z + 1}
+		pixel = v.Multiply(0.5)
 	} else {
 		pixel = backgroundPixel(ray)
 	}
