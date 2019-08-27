@@ -5,8 +5,32 @@ import (
 	"image/color"
 	"image/png"
 	"math"
+	"math/rand"
 	"os"
 )
+
+// camera.go
+type Camera struct {
+	Origin          Vector
+	LowerLeftCorner Vector
+	Horizontal      Vector
+	Vertical        Vector
+}
+
+func (camera *Camera) getRay(u float64, v float64) *Ray {
+	var direction = camera.LowerLeftCorner.Add(camera.Horizontal.Multiply(u).Add(camera.Vertical.Multiply(v)).Minus(&camera.Origin))
+	return &Ray{
+		camera.Origin,
+		*direction,
+	}
+}
+
+var MainCamera Camera = Camera{
+	LowerLeftCorner: Vector{-2.0, -1.0, -1.0},
+	Horizontal:      Vector{4.0, 0.0, 0.0},
+	Vertical:        Vector{0.0, 2.0, 0.0},
+	Origin:          Vector{0.0, 0.0, 0.0},
+}
 
 // hitable.go
 type HitRecord struct {
@@ -127,8 +151,8 @@ var ground = Sphere{groundCenter, 100.0}
 
 func itemsInScene() HitableList {
 	hs := make([]Hitable, 2)
-	hs[0] = &Sphere{circleCenter, 0.5}
-	hs[1] = &Sphere{groundCenter, 100.0}
+	hs[0] = &circle
+	hs[1] = &ground
 	return hs
 }
 
@@ -143,44 +167,44 @@ func backgroundPixel(ray *Ray) *Vector {
 	return pixel
 }
 
-func pixelValue(ray *Ray, hs HitableList) *color.RGBA {
-	var pixel *Vector
+func VectorToRGBA(pixel *Vector) *color.RGBA {
+	r := uint8(float64(255.99) * pixel.X)
+	g := uint8(float64(255.99) * pixel.Y)
+	b := uint8(float64(255.99) * pixel.Z)
+	return &color.RGBA{r, g, b, 255}
+}
+
+func pixelValue(nSamples int, ray *Ray, hs HitableList) *Vector {
 	rec := &HitRecord{}
 	isHit := hs.hit(ray, 0.0, math.MaxFloat64, rec)
 	if isHit {
 		v := Vector{rec.Normal.X + 1, rec.Normal.Y + 1, rec.Normal.Z + 1}
-		pixel = v.Multiply(0.5)
+		return v.Multiply(0.5)
 	} else {
-		pixel = backgroundPixel(ray)
+		return backgroundPixel(ray)
 	}
-	r := uint8(float64(255.99) * pixel.X)
-	g := uint8(float64(255.99) * pixel.Y)
-	b := uint8(float64(255.99) * pixel.Z)
-	color := &color.RGBA{r, g, b, 255}
-	return color
 }
 
 func main() {
-	nx := 400
-	ny := 200
+	nx := 200
+	ny := 100
+	nSamples := 100
 	image := image.NewRGBA(image.Rect(0, 0, nx, ny))
-
-	lower_left_corner := Vector{-2.0, -1.0, -1.0}
-	horizontal := Vector{4.0, 0.0, 0.0}
-	vertical := Vector{0.0, 2.0, 0.0}
-	origin := Vector{0.0, 0.0, 0.0}
 
 	world := itemsInScene()
 
 	for j := ny - 1; j >= 0; j-- {
 		for i := 0; i < nx; i++ {
-			u := float64(i) / float64(nx) // x coordinate
-			v := float64(j) / float64(ny) // y coordinte
-
-			direction := lower_left_corner.Add(horizontal.Multiply(u).Add(vertical.Multiply(v)))
-			ray := &Ray{origin, *direction}
-
-			color := pixelValue(ray, world)
+			pixel := &Vector{0, 0, 0}
+			// take multiple samples to anti alias and blend boundaries
+			for s := 0; s < nSamples; s++ {
+				u := (float64(i) + rand.Float64()) / float64(nx) // x coordinate
+				v := (float64(j) + rand.Float64()) / float64(ny) // y coordinte
+				ray := MainCamera.getRay(u, v)
+				pixel = pixel.Add(pixelValue(nSamples, ray, world))
+			}
+			pixel = pixel.Divide(float64(nSamples))
+			color := VectorToRGBA(pixel)
 			image.SetRGBA(i, int(math.Floor(math.Abs(float64(j-ny)))), *color)
 		}
 	}
