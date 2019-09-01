@@ -93,6 +93,19 @@ func (s *Sphere) hit(ray *Ray, t_min float64, t_max float64, rec *HitRecord) boo
 	return false
 }
 
+func RandomInUnitSphere() *Vector {
+	var vec Vector
+	lengthOneVector := &Vector{1.0, 1.0, 1.0}
+	for i := 0; true; i++ {
+		v := Vector{rand.Float64(), rand.Float64(), rand.Float64()}
+		vec = *v.Multiply(2.0).Minus(lengthOneVector)
+		if vec.SquaredLength() < 1.0 {
+			break
+		}
+	}
+	return &vec
+}
+
 // ray.go
 type Ray struct {
 	Origin    Vector
@@ -143,6 +156,10 @@ func (v *Vector) Dot(u *Vector) float64 {
 	return v.X*u.X + v.Y*u.Y + v.Z*u.Z
 }
 
+func (v *Vector) SquaredLength() float64 {
+	return v.X*v.X + v.Y*v.Y + v.Z*v.Z
+}
+
 // main.go
 var circleCenter Vector = Vector{0.0, 0.0, -1.0}
 var circle Sphere = Sphere{circleCenter, 0.5}
@@ -168,18 +185,20 @@ func backgroundPixel(ray *Ray) *Vector {
 }
 
 func VectorToRGBA(pixel *Vector) *color.RGBA {
-	r := uint8(float64(255.99) * pixel.X)
-	g := uint8(float64(255.99) * pixel.Y)
-	b := uint8(float64(255.99) * pixel.Z)
+	// the sqrt is a gamma 2 correction
+	r := uint8(float64(255.99) * math.Sqrt(pixel.X))
+	g := uint8(float64(255.99) * math.Sqrt(pixel.Y))
+	b := uint8(float64(255.99) * math.Sqrt(pixel.Z))
 	return &color.RGBA{r, g, b, 255}
 }
 
-func pixelValue(nSamples int, ray *Ray, hs HitableList) *Vector {
+func pixelValue(ray *Ray, hs HitableList) *Vector {
 	rec := &HitRecord{}
-	isHit := hs.hit(ray, 0.0, math.MaxFloat64, rec)
+	isHit := hs.hit(ray, 0.001, math.MaxFloat64, rec)
 	if isHit {
-		v := Vector{rec.Normal.X + 1, rec.Normal.Y + 1, rec.Normal.Z + 1}
-		return v.Multiply(0.5)
+		target := rec.P.Add(rec.Normal).Add(RandomInUnitSphere())
+		ray := Ray{*rec.P, *target.Minus(rec.P)}
+		return pixelValue(&ray, hs).Multiply(0.5)
 	} else {
 		return backgroundPixel(ray)
 	}
@@ -201,7 +220,7 @@ func main() {
 				u := (float64(i) + rand.Float64()) / float64(nx) // x coordinate
 				v := (float64(j) + rand.Float64()) / float64(ny) // y coordinte
 				ray := MainCamera.getRay(u, v)
-				pixel = pixel.Add(pixelValue(nSamples, ray, world))
+				pixel = pixel.Add(pixelValue(ray, world))
 			}
 			pixel = pixel.Divide(float64(nSamples))
 			color := VectorToRGBA(pixel)
