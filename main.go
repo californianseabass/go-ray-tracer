@@ -44,6 +44,49 @@ type Hitable interface {
 	hit(r *Ray, t_min float64, t_max float64, rec *HitRecord) bool
 }
 
+// dielectric.go
+func schlick(cosine float64, refIdx float64) float64 {
+	r0 := (1 - refIdx) / (1 + refIdx)
+	r0 = r0 * r0
+	return r0 + (1-r0)*math.Pow((1-cosine), 5)
+}
+
+type Dielectric struct {
+	refIdx float64
+}
+
+func (de Dielectric) Scatter(ray *Ray, rec *HitRecord, attenuation *Vector, scattered *Ray) bool {
+	outwardNormal := Vector{}
+	refracted := &Vector{}
+	reflected := reflect(ray.Direction, *rec.Normal)
+	var niOverNt float64
+	var cosine float64
+	*attenuation = Vector{1.0, 1.0, 1.0}
+	var reflectProb float64
+	if ray.Direction.Dot(rec.Normal) > 0 {
+		outwardNormal = *rec.Normal.Negate()
+		niOverNt = de.refIdx
+		cosine = de.refIdx * ray.Direction.Dot(rec.Normal) / ray.Direction.Length()
+	} else {
+		outwardNormal = *rec.Normal
+		niOverNt = 1.0 / de.refIdx
+		cosine = -1.0 * ray.Direction.Dot(rec.Normal) / ray.Direction.Length()
+	}
+	if Refract(ray.Direction, outwardNormal, niOverNt, refracted) {
+		reflectProb = schlick(cosine, de.refIdx)
+	} else {
+		*scattered = Ray{*rec.P, *reflected}
+		reflectProb = 1.0
+	}
+	if rand.Float64() < reflectProb {
+		*scattered = Ray{*rec.P, *reflected}
+	} else {
+		*scattered = Ray{*rec.P, *refracted}
+	}
+
+	return true
+}
+
 // metal.go
 type Metal struct {
 	albedo Vector
@@ -174,6 +217,10 @@ func (v *Vector) Multiply(u *Vector) *Vector {
 	return &Vector{v.X * u.X, v.Y * u.Y, v.Z * u.Z}
 }
 
+func (v *Vector) Negate() *Vector {
+	return &Vector{-v.X, -v.Y, -v.Z}
+}
+
 func (v *Vector) Divide(t float64) *Vector {
 	return &Vector{v.X / t, v.Y / t, v.Z / t}
 }
@@ -197,6 +244,18 @@ func (v *Vector) SquaredLength() float64 {
 
 func reflect(v Vector, n Vector) *Vector {
 	return v.Minus(n.Scale(v.Dot(&n) * 2))
+}
+
+func Refract(v Vector, n Vector, niOverNt float64, refracted *Vector) bool {
+	unit := UnitVector(&v)
+	dt := unit.Dot(&n)
+	discriminant := 1.0 - niOverNt*niOverNt*(1-dt*dt)
+	if discriminant > 0.0 {
+		*refracted = *unit.Minus(n.Scale(dt)).Scale(niOverNt).Minus(n.Scale(math.Sqrt(discriminant)))
+		return true
+	} else {
+		return false
+	}
 }
 
 // main.go
@@ -227,7 +286,8 @@ func pixelValue(ray *Ray, hs HitableList, depth int) *Vector {
 		scattered := &Ray{}
 		attenuation := &Vector{}
 		if depth < 50 && rec.Material.Scatter(ray, rec, attenuation, scattered) {
-			return attenuation.Multiply(pixelValue(scattered, hs, depth+1))
+			temp := attenuation.Multiply(pixelValue(scattered, hs, depth+1))
+			return temp
 		} else {
 			return &Vector{0.0, 0.0, 0.0}
 		}
@@ -236,27 +296,19 @@ func pixelValue(ray *Ray, hs HitableList, depth int) *Vector {
 	}
 }
 
-var circleCenter Vector = Vector{0.0, 0.0, -1.0}
-var circle Sphere = Sphere{circleCenter, 0.5, Lambertian{Vector{0.8, 0.3, 0.3}}}
-var groundCenter Vector = Vector{0.0, -100.5, -1}
-var ground = Sphere{groundCenter, 100.0, Lambertian{Vector{0.8, 0.8, 0.0}}}
-var circleACenter Vector = Vector{1.0, 0.0, -1.0}
-var circleA Sphere = Sphere{circleACenter, 0.5, Metal{Vector{0.8, 0.6, 0.2}}}
-var circleBCenter Vector = Vector{-1.0, 0.0, -1.0}
-var circleB Sphere = Sphere{circleBCenter, 0.5, Metal{Vector{0.8, 0.8, 0.8}}}
-
 func itemsInScene() HitableList {
-	hs := make([]Hitable, 4)
-	hs[0] = &circle
-	hs[1] = &ground
-	hs[2] = &circleA
-	hs[3] = &circleB
+	hs := make([]Hitable, 5)
+	hs[0] = &Sphere{Vector{0.0, 0.0, -1.0}, 0.5, Lambertian{Vector{0.8, 0.3, 0.3}}}
+	hs[1] = &Sphere{Vector{0.0, -100.5, -1}, 100.0, Lambertian{Vector{0.8, 0.8, 0.0}}}
+	hs[2] = &Sphere{Vector{1.0, 0.0, -1.0}, 0.5, Metal{Vector{0.8, 0.6, 0.2}}}
+	hs[3] = &Sphere{Vector{-1.0, 0.0, -1.0}, 0.5, Dielectric{1.5}}
+	hs[4] = &Sphere{Vector{-1.0, 0.0, -1.0}, -0.45, Dielectric{1.5}}
 	return hs
 }
 
 func main() {
-	nx := 600
-	ny := 300
+	nx := 200
+	ny := 100
 	nSamples := 100
 	image := image.NewRGBA(image.Rect(0, 0, nx, ny))
 
