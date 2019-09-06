@@ -1,13 +1,19 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
 	"math"
 	"math/rand"
 	"os"
+	"sort"
 )
+
+// TODOS
+// only use pointers if underlying object will be mutated
+// instead of passing pointers to save allocated object in closure, allocate and return to caller
 
 // camera.go
 type Camera struct {
@@ -75,6 +81,55 @@ type HitRecord struct {
 
 type Hitable interface {
 	hit(r *Ray, t_min float64, t_max float64, rec *HitRecord) bool
+	boundingBox() (AABB, bool)
+}
+
+type HitablesX []Hitable
+
+func (hs HitablesX) Len() int {
+	return len(hs)
+}
+
+func (hs HitablesX) Less(i int, j int) bool {
+	a, _ := hs[i].boundingBox()
+	b, _ := hs[j].boundingBox()
+	return a.Min.X < b.Min.X
+}
+
+func (hs HitablesX) Swap(i, j int) {
+	hs[i], hs[j] = hs[j], hs[i]
+}
+
+type HitablesY []Hitable
+
+func (hs HitablesY) Len() int {
+	return len(hs)
+}
+
+func (hs HitablesY) Less(i int, j int) bool {
+	a, _ := hs[i].boundingBox()
+	b, _ := hs[j].boundingBox()
+	return a.Min.Y < b.Min.Y
+}
+
+func (hs HitablesY) Swap(i, j int) {
+	hs[i], hs[j] = hs[j], hs[i]
+}
+
+type HitablesZ []Hitable
+
+func (hs HitablesZ) Len() int {
+	return len(hs)
+}
+
+func (hs HitablesZ) Less(i int, j int) bool {
+	a, _ := hs[i].boundingBox()
+	b, _ := hs[j].boundingBox()
+	return a.Min.Z < b.Min.Z
+}
+
+func (hs HitablesZ) Swap(i, j int) {
+	hs[i], hs[j] = hs[j], hs[i]
 }
 
 // dielectric.go
@@ -161,6 +216,27 @@ func (hs HitableList) hit(r *Ray, t_min float64, t_max float64, rec *HitRecord) 
 	return hitAnything
 }
 
+func (hs HitableList) boundingBox() (AABB, bool) {
+	if len(hs) < 1 {
+		return AABB{}, false
+	}
+	box, hasBBox := hs[0].boundingBox()
+	if !hasBBox {
+		fmt.Println("hey we hit something bad")
+		return AABB{}, false
+	}
+	for _, h := range hs[1:] {
+		tempBox, hasBBox := h.boundingBox()
+		if hasBBox {
+			fmt.Println("hey we hit something bad")
+			box = surroundingBox(tempBox, box)
+		} else {
+			return AABB{}, false
+		}
+	}
+	return box, true
+}
+
 type Material interface {
 	Scatter(ray *Ray, rec *HitRecord, attenuation *Vector, scattered *Ray) bool
 }
@@ -198,6 +274,12 @@ func (s *Sphere) hit(ray *Ray, t_min float64, t_max float64, rec *HitRecord) boo
 		}
 	}
 	return false
+}
+
+func (s Sphere) boundingBox() (AABB, bool) {
+	min := *s.Center.Minus(&Vector{s.Radius, s.Radius, s.Radius})
+	max := *s.Center.Add(&Vector{s.Radius, s.Radius, s.Radius})
+	return AABB{min, max}, true
 }
 
 func RandomInUnitSphere() *Vector {
@@ -295,6 +377,115 @@ func Refract(v Vector, n Vector, niOverNt float64, refracted *Vector) bool {
 	}
 }
 
+// aabb.go
+type AABB struct {
+	Min Vector
+	Max Vector
+}
+
+func (ab AABB) hit(ray Ray, tMin float64, tMax float64) bool {
+	invX := 1 / ray.Direction.X
+	tx0 := (ab.Min.X - ray.Origin.X) * invX
+	tx1 := (ab.Max.X - ray.Origin.X) * invX
+	if invX < 0 {
+		tx0, tx1 = tx1, tx0
+	}
+	if math.Min(tMax, tx1) <= math.Max(tMin, tx0) {
+		return false
+	}
+	invY := 1 / ray.Direction.Y
+	ty0 := (ab.Min.Y - ray.Origin.Y) * invY
+	ty1 := (ab.Max.Y - ray.Origin.Y) * invY
+	if invY < 0 {
+		ty0, ty1 = ty1, ty0
+	}
+	if math.Min(tMax, ty1) <= math.Max(tMin, ty0) {
+		return false
+	}
+	invZ := 1 / ray.Direction.Z
+	tz0 := (ab.Min.Z - ray.Origin.Z) * invZ
+	tz1 := (ab.Max.Z - ray.Origin.Z) * invZ
+	if invZ < 0 {
+		tz0, tz1 = tz1, tz0
+	}
+	if math.Min(tMax, tz1) <= math.Max(tMin, tz0) {
+		return false
+	}
+	return true
+}
+
+func surroundingBox(a AABB, b AABB) AABB {
+	small := Vector{math.Min(a.Min.X, b.Min.X), math.Min(a.Min.Y, b.Min.Y), math.Min(a.Min.Z, b.Min.Z)}
+	big := Vector{math.Max(a.Max.X, b.Max.X), math.Max(a.Max.Y, b.Max.Y), math.Max(a.Max.Z, b.Max.Z)}
+	return AABB{small, big}
+}
+
+// bvhNode.go
+type BvhNode struct {
+	BBox  AABB
+	Left  Hitable
+	Right Hitable
+}
+
+func (box BvhNode) boundingBox() (AABB, bool) {
+	return box.BBox, true
+}
+
+func (box BvhNode) hit(ray *Ray, tMin float64, tMax float64, rec *HitRecord) bool {
+	if !box.BBox.hit(*ray, tMin, tMax) {
+		return false
+	}
+	var leftRec, rightRec HitRecord
+	hitLeft := box.Left.hit(ray, tMin, tMax, &leftRec)
+	hitRight := box.Right.hit(ray, tMin, tMax, &rightRec)
+	if hitLeft && hitRight {
+		if leftRec.T < rightRec.T {
+			*rec = leftRec
+		} else {
+			*rec = rightRec
+		}
+		return true
+	} else if hitLeft {
+		*rec = leftRec
+		return true
+	} else if hitRight {
+		*rec = rightRec
+		return true
+	}
+	return false
+}
+
+func (node *BvhNode) fromList(hs []Hitable) {
+	axis := int(rand.Float64() * 3)
+	if axis == 0 {
+		sort.Sort(HitablesX(hs))
+	} else if axis == 1 {
+		sort.Sort(HitablesY(hs))
+	} else {
+		sort.Sort(HitablesZ(hs))
+	}
+	if len(hs) == 1 {
+		node.Left = hs[0]
+		node.Right = hs[0]
+	} else if len(hs) == 2 {
+		node.Left = hs[0]
+		node.Right = hs[1]
+	} else {
+		left := BvhNode{}
+		left.fromList(hs[:int(len(hs)/2)])
+		right := BvhNode{}
+		right.fromList(hs[int(len(hs)/2)+1:])
+		node.Left = left
+		node.Right = right
+	}
+	leftBBox, noLeft := node.Left.boundingBox()
+	rightBBox, noRight := node.Right.boundingBox()
+	if !noLeft || !noRight {
+		fmt.Println("not again")
+	}
+	node.BBox = surroundingBox(leftBBox, rightBBox)
+}
+
 // main.go
 
 func backgroundPixel(ray *Ray) *Vector {
@@ -316,14 +507,14 @@ func VectorToRGBA(pixel *Vector) *color.RGBA {
 	return &color.RGBA{r, g, b, 255}
 }
 
-func pixelValue(ray *Ray, hs HitableList, depth int) *Vector {
+func pixelValue(ray *Ray, hitable Hitable, depth int) *Vector {
 	rec := &HitRecord{}
-	isHit := hs.hit(ray, 0.001, math.MaxFloat64, rec)
+	isHit := hitable.hit(ray, 0.001, math.MaxFloat64, rec)
 	if isHit {
 		scattered := &Ray{}
 		attenuation := &Vector{}
 		if depth < 50 && rec.Material.Scatter(ray, rec, attenuation, scattered) {
-			temp := attenuation.Multiply(pixelValue(scattered, hs, depth+1))
+			temp := attenuation.Multiply(pixelValue(scattered, hitable, depth+1))
 			return temp
 		} else {
 			return &Vector{0.0, 0.0, 0.0}
@@ -334,31 +525,71 @@ func pixelValue(ray *Ray, hs HitableList, depth int) *Vector {
 }
 
 func itemsInScene() HitableList {
-	hs := make([]Hitable, 5)
-	hs[0] = &Sphere{Vector{0.0, 0.0, -1.0}, 0.5, Lambertian{Vector{0.1, 0.2, 0.5}}}
-	hs[1] = &Sphere{Vector{0.0, -100.5, -1}, 100.0, Lambertian{Vector{0.8, 0.8, 0.0}}}
-	hs[2] = &Sphere{Vector{1.0, 0.0, -1.0}, 0.5, Metal{Vector{0.8, 0.6, 0.2}}}
-	// negative radius causes surface normals to point inwards, which allows us to create a glass bubble
-	hs[3] = &Sphere{Vector{-1.0, 0.0, -1.0}, 0.5, Dielectric{1.5}}
-	hs[4] = &Sphere{Vector{-1.0, 0.0, -1.0}, -0.45, Dielectric{1.5}}
+	hs := []Hitable{}
+	hs = append(hs, &Sphere{Vector{0, -1000, 0}, 1000, Lambertian{Vector{0.5, 0.5, 0.5}}})
+	for a := -11; a < 11; a++ {
+		for b := -11; b < 11; b++ {
+			chooseMaterial := rand.Float64()
+			center := Vector{float64(a) + 0.9*rand.Float64(), 0.2, float64(b) + 0.9*rand.Float64()}
+			if center.Minus(&Vector{4, 0.2, 0}).Length() > 0.9 {
+				if chooseMaterial < 0.8 { // diffuse
+					hs = append(hs, &Sphere{center, 0.2, Lambertian{Vector{rand.Float64(), rand.Float64(), rand.Float64()}}})
+				} else if chooseMaterial < 0.95 { // metal
+					hs = append(hs, &Sphere{center, 0.2, Metal{Vector{0.5 * (1 + rand.Float64()), 0.5 * (1 + rand.Float64()), 0.5 * (1 + rand.Float64())}}})
+				} else { // dielectic
+					hs = append(hs, &Sphere{center, 0.2, Dielectric{1.5}})
+				}
+			}
+		}
+	}
+	hs = append(hs, &Sphere{Vector{0, 1, 0}, 1.0, Dielectric{1.5}})
+	hs = append(hs, &Sphere{Vector{-4, 1, -0}, 1.0, Lambertian{Vector{0.4, 0.2, 0.1}}})
+	hs = append(hs, &Sphere{Vector{4, 1, 0}, 1.0, Metal{Vector{0.7, 0.6, 0.5}}})
 	return hs
 }
 
+type RenderablePixel struct {
+	color color.RGBA
+	x     int
+	y     int
+}
+
+func calculatePixelValues(camera *Camera, world Hitable, i, j, nx, ny int, nSamples int) Vector {
+	u := (float64(i) + rand.Float64()) / float64(nx) // x coordinate
+	v := (float64(j) + rand.Float64()) / float64(ny) // y coordinte
+	ray := camera.getRay(u, v)
+	return *pixelValue(ray, world, 0)
+}
+
+// func calculatePixelValues(camera *Camera, world Hitable, i, j, nx, ny int, nSamples int) <-chan *Vector {
+// 	ch := make(chan *Vector)
+// 	for s := 0; s < nSamples; s++ {
+// 		go func() {
+// 			u := (float64(i) + rand.Float64()) / float64(nx) // x coordinate
+// 			v := (float64(j) + rand.Float64()) / float64(ny) // y coordinte
+// 			ray := camera.getRay(u, v)
+// 			ch <- pixelValue(ray, world, 0)
+// 		}()
+// 	}
+// 	return ch
+// }
+
 func main() {
 	MainCamera := &Camera{}
-	nx := 600
-	ny := 300
+	nx := 200
+	ny := 100
 	nSamples := 100
 	image := image.NewRGBA(image.Rect(0, 0, nx, ny))
 
-	lookFrom := Vector{3, 3, 2}
-	lookAt := Vector{0, 0, -1}
+	lookFrom := Vector{13, 2, 2}
+	lookAt := Vector{0, 0, 0}
 	distToFocus := lookFrom.Minus(&lookAt).Length()
-	MainCamera.New(lookFrom, lookAt, 20, float64(nx)/float64(ny), 2.0, distToFocus)
+	MainCamera.New(lookFrom, lookAt, 20, float64(nx)/float64(ny), 0.1, distToFocus)
 
-	world := itemsInScene()
+	bvh := BvhNode{}
+	bvh.fromList(itemsInScene())
 
-	for j := ny - 1; j >= 0; j-- {
+	for j := 0; j < ny; j++ {
 		for i := 0; i < nx; i++ {
 			pixel := &Vector{0, 0, 0}
 			// take multiple samples to anti alias and blend boundaries
@@ -366,11 +597,14 @@ func main() {
 				u := (float64(i) + rand.Float64()) / float64(nx) // x coordinate
 				v := (float64(j) + rand.Float64()) / float64(ny) // y coordinte
 				ray := MainCamera.getRay(u, v)
-				pixel = pixel.Add(pixelValue(ray, world, 0))
+				pixel = pixel.Add(pixelValue(ray, bvh, 0))
 			}
-			pixel = pixel.Divide(float64(nSamples))
-			color := VectorToRGBA(pixel)
-			image.SetRGBA(i, int(math.Floor(math.Abs(float64(j-ny)))), *color)
+			px := RenderablePixel{
+				x:     i,
+				y:     int(math.Floor(math.Abs(float64(j - ny)))),
+				color: *VectorToRGBA(pixel.Divide(float64(nSamples))),
+			}
+			image.SetRGBA(px.x, px.y, px.color)
 		}
 	}
 
