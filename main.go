@@ -15,9 +15,29 @@ type Camera struct {
 	LowerLeftCorner Vector
 	Horizontal      Vector
 	Vertical        Vector
+	LensRadius      float64
+	u               Vector
+	v               Vector
+	w               Vector
 }
 
-func (camera *Camera) New(lookFrom Vector, lookAt Vector, vup Vector, vfovDegrees float64, aspect float64) {
+// change this for camera angles that aren't level to the horizontal plane
+var vup Vector = Vector{0, 1, 0}
+
+func randomInUnitDisk() Vector {
+	p := Vector{math.MaxFloat64, math.MaxFloat64, math.MaxFloat64}
+	for true {
+		if p.Dot(&p) < 1.0 {
+			break
+		}
+		randomVector := Vector{rand.Float64(), rand.Float64(), 0}
+		p = *randomVector.Scale(2.0).Minus(&Vector{1, 1, 0})
+	}
+	return p
+}
+
+func (camera *Camera) New(lookFrom Vector, lookAt Vector, vfovDegrees float64, aspect float64, aperture float64, focusDist float64) {
+	camera.LensRadius = aperture / 2
 	theta := vfovDegrees * math.Pi / 180
 	halfHeight := math.Tan(theta / 2)
 	halfWidth := aspect * halfHeight
@@ -25,16 +45,22 @@ func (camera *Camera) New(lookFrom Vector, lookAt Vector, vup Vector, vfovDegree
 
 	w := UnitVector(lookFrom.Minus(&lookAt))
 	u := UnitVector(vup.Cross(w))
-	v := UnitVector(w.Cross(u))
-	camera.LowerLeftCorner = *lookFrom.Minus(u.Scale(halfWidth)).Minus(v.Scale(halfHeight)).Minus(w)
-	camera.Horizontal = *u.Scale(2 * halfWidth)
-	camera.Vertical = *v.Scale(2 * halfHeight)
+	v := w.Cross(u)
+	camera.w = *w
+	camera.u = *u
+	camera.v = *v
+	camera.LowerLeftCorner = *lookFrom.Minus(u.Scale(halfWidth * focusDist)).Minus(v.Scale(halfHeight * focusDist)).Minus(w.Scale(focusDist))
+	camera.Horizontal = *u.Scale(2 * halfWidth * focusDist)
+	camera.Vertical = *v.Scale(2 * halfHeight * focusDist)
 }
 
-func (camera Camera) getRay(u float64, v float64) *Ray {
-	var direction = camera.LowerLeftCorner.Add(camera.Horizontal.Scale(u).Add(camera.Vertical.Scale(v)).Minus(&camera.Origin))
+func (camera Camera) getRay(s float64, t float64) *Ray {
+	rd := randomInUnitDisk()
+	rd = *rd.Scale(camera.LensRadius)
+	offset := camera.u.Scale(rd.X).Add(camera.v.Scale(rd.Y))
+	var direction = camera.LowerLeftCorner.Add(camera.Horizontal.Scale(s)).Add(camera.Vertical.Scale(t)).Minus(&camera.Origin).Minus(offset)
 	return &Ray{
-		camera.Origin,
+		*camera.Origin.Add(offset),
 		*direction,
 	}
 }
@@ -325,7 +351,10 @@ func main() {
 	nSamples := 100
 	image := image.NewRGBA(image.Rect(0, 0, nx, ny))
 
-	MainCamera.New(Vector{-2, 2, 1}, Vector{0, 0, -1}, Vector{0, 1, 0}, 90, float64(nx)/float64(ny))
+	lookFrom := Vector{3, 3, 2}
+	lookAt := Vector{0, 0, -1}
+	distToFocus := lookFrom.Minus(&lookAt).Length()
+	MainCamera.New(lookFrom, lookAt, 20, float64(nx)/float64(ny), 2.0, distToFocus)
 
 	world := itemsInScene()
 
