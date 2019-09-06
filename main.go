@@ -17,19 +17,26 @@ type Camera struct {
 	Vertical        Vector
 }
 
-func (camera *Camera) getRay(u float64, v float64) *Ray {
+func (camera *Camera) New(lookFrom Vector, lookAt Vector, vup Vector, vfovDegrees float64, aspect float64) {
+	theta := vfovDegrees * math.Pi / 180
+	halfHeight := math.Tan(theta / 2)
+	halfWidth := aspect * halfHeight
+	camera.Origin = lookFrom
+
+	w := UnitVector(lookFrom.Minus(&lookAt))
+	u := UnitVector(vup.Cross(w))
+	v := UnitVector(w.Cross(u))
+	camera.LowerLeftCorner = *lookFrom.Minus(u.Scale(halfWidth)).Minus(v.Scale(halfHeight)).Minus(w)
+	camera.Horizontal = *u.Scale(2 * halfWidth)
+	camera.Vertical = *v.Scale(2 * halfHeight)
+}
+
+func (camera Camera) getRay(u float64, v float64) *Ray {
 	var direction = camera.LowerLeftCorner.Add(camera.Horizontal.Scale(u).Add(camera.Vertical.Scale(v)).Minus(&camera.Origin))
 	return &Ray{
 		camera.Origin,
 		*direction,
 	}
-}
-
-var MainCamera Camera = Camera{
-	LowerLeftCorner: Vector{-2.0, -1.0, -1.0},
-	Horizontal:      Vector{4.0, 0.0, 0.0},
-	Vertical:        Vector{0.0, 2.0, 0.0},
-	Origin:          Vector{0.0, 0.0, 0.0},
 }
 
 // hitable.go
@@ -238,6 +245,10 @@ func (v *Vector) Dot(u *Vector) float64 {
 	return v.X*u.X + v.Y*u.Y + v.Z*u.Z
 }
 
+func (v *Vector) Cross(u *Vector) *Vector {
+	return &Vector{v.Y*u.Z - v.Z*u.Y, -(v.X*u.Z - v.Z*u.X), v.X*u.Y - v.Y*u.X}
+}
+
 func (v *Vector) SquaredLength() float64 {
 	return v.X*v.X + v.Y*v.Y + v.Z*v.Z
 }
@@ -298,19 +309,23 @@ func pixelValue(ray *Ray, hs HitableList, depth int) *Vector {
 
 func itemsInScene() HitableList {
 	hs := make([]Hitable, 5)
-	hs[0] = &Sphere{Vector{0.0, 0.0, -1.0}, 0.5, Lambertian{Vector{0.8, 0.3, 0.3}}}
+	hs[0] = &Sphere{Vector{0.0, 0.0, -1.0}, 0.5, Lambertian{Vector{0.1, 0.2, 0.5}}}
 	hs[1] = &Sphere{Vector{0.0, -100.5, -1}, 100.0, Lambertian{Vector{0.8, 0.8, 0.0}}}
 	hs[2] = &Sphere{Vector{1.0, 0.0, -1.0}, 0.5, Metal{Vector{0.8, 0.6, 0.2}}}
+	// negative radius causes surface normals to point inwards, which allows us to create a glass bubble
 	hs[3] = &Sphere{Vector{-1.0, 0.0, -1.0}, 0.5, Dielectric{1.5}}
 	hs[4] = &Sphere{Vector{-1.0, 0.0, -1.0}, -0.45, Dielectric{1.5}}
 	return hs
 }
 
 func main() {
-	nx := 200
-	ny := 100
+	MainCamera := &Camera{}
+	nx := 600
+	ny := 300
 	nSamples := 100
 	image := image.NewRGBA(image.Rect(0, 0, nx, ny))
+
+	MainCamera.New(Vector{-2, 2, 1}, Vector{0, 0, -1}, Vector{0, 1, 0}, 90, float64(nx)/float64(ny))
 
 	world := itemsInScene()
 
