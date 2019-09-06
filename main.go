@@ -334,13 +334,26 @@ func pixelValue(ray *Ray, hs HitableList, depth int) *Vector {
 }
 
 func itemsInScene() HitableList {
-	hs := make([]Hitable, 5)
-	hs[0] = &Sphere{Vector{0.0, 0.0, -1.0}, 0.5, Lambertian{Vector{0.1, 0.2, 0.5}}}
-	hs[1] = &Sphere{Vector{0.0, -100.5, -1}, 100.0, Lambertian{Vector{0.8, 0.8, 0.0}}}
-	hs[2] = &Sphere{Vector{1.0, 0.0, -1.0}, 0.5, Metal{Vector{0.8, 0.6, 0.2}}}
-	// negative radius causes surface normals to point inwards, which allows us to create a glass bubble
-	hs[3] = &Sphere{Vector{-1.0, 0.0, -1.0}, 0.5, Dielectric{1.5}}
-	hs[4] = &Sphere{Vector{-1.0, 0.0, -1.0}, -0.45, Dielectric{1.5}}
+	hs := []Hitable{}
+	hs = append(hs, &Sphere{Vector{0, -1000, 0}, 1000, Lambertian{Vector{0.5, 0.5, 0.5}}})
+	for a := -11; a < 11; a++ {
+		for b := -11; b < 11; b++ {
+			chooseMaterial := rand.Float64()
+			center := Vector{float64(a) + 0.9*rand.Float64(), 0.2, float64(b) + 0.9*rand.Float64()}
+			if center.Minus(&Vector{4, 0.2, 0}).Length() > 0.9 {
+				if chooseMaterial < 0.8 { // diffuse
+					hs = append(hs, &Sphere{center, 0.2, Lambertian{Vector{rand.Float64(), rand.Float64(), rand.Float64()}}})
+				} else if chooseMaterial < 0.95 { // metal
+					hs = append(hs, &Sphere{center, 0.2, Metal{Vector{0.5 * (1 + rand.Float64()), 0.5 * (1 + rand.Float64()), 0.5 * (1 + rand.Float64())}}})
+				} else { // dielectic
+					hs = append(hs, &Sphere{center, 0.2, Dielectric{1.5}})
+				}
+			}
+		}
+	}
+	hs = append(hs, &Sphere{Vector{0, 1, 0}, 1.0, Dielectric{1.5}})
+	hs = append(hs, &Sphere{Vector{-4, 1, -0}, 1.0, Lambertian{Vector{0.4, 0.2, 0.1}}})
+	hs = append(hs, &Sphere{Vector{4, 1, 0}, 1.0, Metal{Vector{0.7, 0.6, 0.5}}})
 	return hs
 }
 
@@ -351,10 +364,10 @@ func main() {
 	nSamples := 100
 	image := image.NewRGBA(image.Rect(0, 0, nx, ny))
 
-	lookFrom := Vector{3, 3, 2}
-	lookAt := Vector{0, 0, -1}
+	lookFrom := Vector{13, 2, 2}
+	lookAt := Vector{0, 0, 0}
 	distToFocus := lookFrom.Minus(&lookAt).Length()
-	MainCamera.New(lookFrom, lookAt, 20, float64(nx)/float64(ny), 2.0, distToFocus)
+	MainCamera.New(lookFrom, lookAt, 20, float64(nx)/float64(ny), 0.1, distToFocus)
 
 	world := itemsInScene()
 
