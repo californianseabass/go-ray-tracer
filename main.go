@@ -323,8 +323,7 @@ func pixelValue(ray *Ray, hs HitableList, depth int) *Vector {
 		scattered := &Ray{}
 		attenuation := &Vector{}
 		if depth < 50 && rec.Material.Scatter(ray, rec, attenuation, scattered) {
-			temp := attenuation.Multiply(pixelValue(scattered, hs, depth+1))
-			return temp
+			return attenuation.Multiply(pixelValue(scattered, hs, depth+1))
 		} else {
 			return &Vector{0.0, 0.0, 0.0}
 		}
@@ -357,10 +356,29 @@ func itemsInScene() HitableList {
 	return hs
 }
 
+type RenderablePixel struct {
+	color color.RGBA
+	x     int
+	y     int
+}
+
+func calculatePixelValues(camera *Camera, world HitableList, i, j, nx, ny int, nSamples int) <-chan *Vector {
+	ch := make(chan *Vector)
+	for s := 0; s < nSamples; s++ {
+		go func() {
+			u := (float64(i) + rand.Float64()) / float64(nx) // x coordinate
+			v := (float64(j) + rand.Float64()) / float64(ny) // y coordinte
+			ray := camera.getRay(u, v)
+			ch <- pixelValue(ray, world, 0)
+		}()
+	}
+	return ch
+}
+
 func main() {
 	MainCamera := &Camera{}
-	nx := 600
-	ny := 300
+	nx := 400
+	ny := 200
 	nSamples := 100
 	image := image.NewRGBA(image.Rect(0, 0, nx, ny))
 
@@ -371,19 +389,20 @@ func main() {
 
 	world := itemsInScene()
 
-	for j := ny - 1; j >= 0; j-- {
+	for j := 0; j < ny; j++ {
 		for i := 0; i < nx; i++ {
 			pixel := &Vector{0, 0, 0}
 			// take multiple samples to anti alias and blend boundaries
+			ch := calculatePixelValues(MainCamera, world, i, j, nx, ny, nSamples)
 			for s := 0; s < nSamples; s++ {
-				u := (float64(i) + rand.Float64()) / float64(nx) // x coordinate
-				v := (float64(j) + rand.Float64()) / float64(ny) // y coordinte
-				ray := MainCamera.getRay(u, v)
-				pixel = pixel.Add(pixelValue(ray, world, 0))
+				pixel = pixel.Add(<-ch)
 			}
-			pixel = pixel.Divide(float64(nSamples))
-			color := VectorToRGBA(pixel)
-			image.SetRGBA(i, int(math.Floor(math.Abs(float64(j-ny)))), *color)
+			px := RenderablePixel{
+				x:     i,
+				y:     int(math.Floor(math.Abs(float64(j - ny)))),
+				color: *VectorToRGBA(pixel.Divide(float64(nSamples))),
+			}
+			image.SetRGBA(px.x, px.y, px.color)
 		}
 	}
 
