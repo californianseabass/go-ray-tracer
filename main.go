@@ -4,9 +4,11 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log"
 	"math"
 	"math/rand"
 	"os"
+	"runtime/pprof"
 )
 
 // camera.go
@@ -377,14 +379,25 @@ func calculatePixelValues(camera *Camera, world HitableList, i, j, nx, ny int, n
 
 func main() {
 	MainCamera := &Camera{}
-	nx := 400
-	ny := 200
+	nx := 200
+	ny := 100
 	nSamples := 100
 	image := image.NewRGBA(image.Rect(0, 0, nx, ny))
 
 	lookFrom := Vector{13, 2, 2}
 	lookAt := Vector{0, 0, 0}
 	distToFocus := lookFrom.Minus(&lookAt).Length()
+
+	f, err := os.Create("cpu.profile")
+	if err != nil {
+		log.Fatal("could not create CPU profile: ", err)
+	}
+	defer f.Close()
+	if err := pprof.StartCPUProfile(f); err != nil {
+		log.Fatal("could not start CPU profile: ", err)
+	}
+	defer pprof.StopCPUProfile()
+
 	MainCamera.New(lookFrom, lookAt, 20, float64(nx)/float64(ny), 0.1, distToFocus)
 
 	world := itemsInScene()
